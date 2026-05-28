@@ -44,6 +44,7 @@ export class FlakyzavrReporter implements Reporter {
       dryRun: false,
       reportProjectName: config.jiraProject,
       reportingLang: 'en',
+      summaryPrefix: '[QA][TsTest]',
       ...config,
     };
 
@@ -322,11 +323,14 @@ export class FlakyzavrReporter implements Reporter {
         );
         this.stats.commented++;
       } else {
-        const fullSummary = renderTemplate(this.lang.summaryTemplate, {
+        const renderedSummary = renderTemplate(this.lang.summaryTemplate, {
           testName: issueTestName,
           projectName: this.config.reportProjectName!,
         });
-        const summary = this.truncateTestName(fullSummary);
+        const prefixedSummary = this.config.summaryPrefix
+          ? `${this.config.summaryPrefix} ${renderedSummary}`
+          : renderedSummary;
+        const summary = this.truncateTestName(prefixedSummary);
         const description =
           overrideDescription ??
           renderTemplate(this.lang.descriptionTemplate, {

@@ -74,6 +74,13 @@ export interface FlakyzavrConfig {
    * Useful when infrastructure failures (DB down, timeout) cause mass test failures.
    */
   groupSameError?: boolean;
+
+  /**
+   * Prefix prepended to every Jira issue summary, e.g. "[QA][TsTest]".
+   * Set to empty string "" to disable.
+   * Default: "[QA][TsTest]"
+   */
+  summaryPrefix?: string;
 }
 
 export interface JiraIssue {
