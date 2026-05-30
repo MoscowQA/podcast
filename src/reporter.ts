@@ -44,6 +44,7 @@ export class FlakyzavrReporter implements Reporter {
       dryRun: false,
       reportProjectName: config.jiraProject,
       reportingLang: 'en',
+      summaryPrefix: '[QA][TsTest]',
       ...config,
     };
 
@@ -168,8 +169,32 @@ export class FlakyzavrReporter implements Reporter {
     }
   }
 
+  private stripAnsi(str: string): string {
+    return str
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+      .replace(/\x1b\([^)]*\)/g, '')
+      .replace(/\[[0-9;]*[a-zA-Z]/g, '')
+      .replace(/[\u001b\u0000-\u001f\u007f]/g, '');
+  }
+
+  private truncateTestName(testName: string): string {
+    const MAX_SUMMARY_LENGTH = 255;
+    const cleanedName = testName.replace(/[\r\n]+/g, ' ').trim();
+    if (cleanedName.length <= MAX_SUMMARY_LENGTH) {
+      return cleanedName;
+    }
+    const lastSlash = Math.max(cleanedName.lastIndexOf('/'), cleanedName.lastIndexOf('\\'));
+    if (lastSlash !== -1) {
+      const fileName = cleanedName.substring(lastSlash + 1);
+      if (fileName.length <= MAX_SUMMARY_LENGTH) {
+        return fileName;
+      }
+    }
+    return cleanedName.substring(0, MAX_SUMMARY_LENGTH);
+  }
+
   private getErrorKey(errorMessage: string): string {
-    return errorMessage.split('\n')[0].trim();
+    return this.stripAnsi(errorMessage.split('\n')[0].trim());
   }
 
   private async processGroupedByError(failures: FailureRecord[]): Promise<void> {
@@ -194,10 +219,16 @@ export class FlakyzavrReporter implements Reporter {
     const first = failures[0];
     const testNames = failures.map((f) => f.testName).join('\n- ');
     const additionalSections = this.buildAdditionalSections(first);
+    const safeErrorKey = this.stripAnsi(errorKey);
+    const fullGroupSummary = renderTemplate(this.lang.summaryTemplate, {
+      testName: safeErrorKey,
+      projectName: this.config.reportProjectName!,
+    });
+    const truncatedErrorKey = this.truncateTestName(fullGroupSummary);
 
     const groupDescription =
       `h3. Multiple tests failed with the same error\n\n` +
-      `*Error:* ${errorKey}\n\n` +
+      `*Error:* ${safeErrorKey}\n\n` +
       `*Failed tests (${failures.length}):*\n- ${testNames}\n\n` +
       `h3. Full error\n{noformat}${first.errorMessage}{noformat}\n\n` +
       additionalSections +
@@ -205,11 +236,11 @@ export class FlakyzavrReporter implements Reporter {
 
     const groupComment =
       `h3. Tests failed again with the same error\n\n` +
-      `*Error:* ${errorKey}\n\n` +
+      `*Error:* ${safeErrorKey}\n\n` +
       `*Failed tests (${failures.length}):*\n- ${testNames}\n\n` +
       (first.jobLink ? `[Job link|${first.jobLink}]\n` : '');
 
-    await this.reportFailure(errorKey, first, groupDescription, groupComment);
+    await this.reportFailure(truncatedErrorKey, first, groupDescription, groupComment);
   }
 
   private async reportFileGroup(fileKey: string, failures: FailureRecord[]): Promise<void> {
@@ -223,6 +254,11 @@ export class FlakyzavrReporter implements Reporter {
       .map((f) => `[${f.testName}]\n${f.pageSnapshot}`)
       .join('\n\n---\n\n');
     const snapshotHeader = 'Page snapshots';
+    const fullFileSummary = renderTemplate(this.lang.summaryTemplate, {
+      testName: fileKey,
+      projectName: this.config.reportProjectName!,
+    });
+    const truncatedFileKey = this.truncateTestName(fullFileSummary);
 
     const groupDescription =
       `h3. Multiple tests failed in the same file\n\n` +
@@ -239,7 +275,7 @@ export class FlakyzavrReporter implements Reporter {
       `*Failed tests (${failures.length}):*\n- ${testNames}\n\n` +
       (first.jobLink ? `[Job link|${first.jobLink}]\n` : '');
 
-    await this.reportFailure(fileKey, first, groupDescription, groupComment);
+    await this.reportFailure(truncatedFileKey, first, groupDescription, groupComment);
   }
 
   private async reportFailure(
@@ -257,9 +293,10 @@ export class FlakyzavrReporter implements Reporter {
     try {
       const client = this.getClient();
 
+      const truncatedTestName = this.truncateTestName(issueTestName);
       const searchResult = await client.searchIssues(
         this.config.jiraProject,
-        issueTestName,
+        truncatedTestName,
         this.config.jiraLabels!,
         this.config.jiraSearchStatuses!,
       );
@@ -286,10 +323,14 @@ export class FlakyzavrReporter implements Reporter {
         );
         this.stats.commented++;
       } else {
-        const summary = renderTemplate(this.lang.summaryTemplate, {
+        const renderedSummary = renderTemplate(this.lang.summaryTemplate, {
           testName: issueTestName,
           projectName: this.config.reportProjectName!,
         });
+        const prefixedSummary = this.config.summaryPrefix
+          ? `${this.config.summaryPrefix} ${renderedSummary}`
+          : renderedSummary;
+        const summary = this.truncateTestName(prefixedSummary);
         const description =
           overrideDescription ??
           renderTemplate(this.lang.descriptionTemplate, {
